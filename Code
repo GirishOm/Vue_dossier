@@ -1,0 +1,344 @@
+#!/usr/local/bin/python2.7
+
+import os, psycopg2
+from tkinter import *
+from tkinter.messagebox import *
+
+conn = psycopg2.connect("dbname=SIEA user=postgres password=postgres host=10.210.2.190")
+cur = conn.cursor()
+cur.execute("""select designation_axians from geo_pays_gex.dossier where designation_axians is not null;""")
+dossiers = cur.fetchall()
+dossiers = [i[0] for i in dossiers]
+dossiers.sort()
+
+def fonction():
+	dossier = label2.get(ACTIVE)
+	commande = """
+	--drop view vue_pays_gex.cables_""" + dossier + """;
+	create or replace view vue_pays_gex.cables_""" + dossier + """ as
+	select id_cable, identifiant, nb_fo.nb_fo as nb_fo, type_cable.type as type_cable, role_fibre.role as role_fibre, type_fo.designation as type_fo, commentaire, dms as date_mise_service, etat.etat, xlbl, ylbl, olbl, cable.geom
+	from cablage_pays_gex.cable
+	left join infos_pays_gex.nb_fo on nb_fo.id_nb_fo=cable.id_nb_fo
+	left join infos_pays_gex.type_cable on type_cable.id_type_cable=cable.id_type_cable
+	left join infos_pays_gex.role_fibre on role_fibre.id_role_fibre=cable.id_role_fibre
+	left join infos_pays_gex.type_fo on type_fo.id_type_fo=cable.id_type_fo
+	left join infos_pays_gex.etat on cable.id_etat=etat.id_etat, 
+	geo_pays_gex.dossier
+	where st_intersects(dossier.geom, cable.geom) and designation_axians = '""" + dossier + """';
+
+	create or replace rule _update as
+	on update to vue_pays_gex.cables_""" + dossier + """
+	do instead update cablage_pays_gex.cable
+	set id_nb_fo = (select id_nb_fo from infos_pays_gex.nb_fo 
+	where new.nb_fo=nb_fo.nb_fo),
+	id_type_cable = (select id_type_cable from infos_pays_gex.type_cable
+	where new.type_cable=type_cable.type),
+	id_role_fibre = (select id_role_fibre from infos_pays_gex.role_fibre
+	where new.role_fibre=role_fibre.role),
+	id_type_fo = (select id_type_fo from infos_pays_gex.type_fo
+	where new.type_fo=type_fo.designation),
+	id_etat = (select id_etat from infos_pays_gex.etat
+	where new.etat=etat.etat),
+	geom = new.geom,
+	commentaire = new.commentaire,
+	identifiant = new.identifiant,
+	dms = new.date_mise_service
+	where old.id_cable=cable.id_cable;
+
+	create or replace rule _insert as
+	on insert to vue_pays_gex.cables_""" + dossier + """
+	do instead insert into cablage_pays_gex.cable (id_cable,identifiant, geom, dms, commentaire, longueur, id_type_cable, id_nb_fo, id_role_fibre, id_type_fo, xlbl, ylbl, olbl, id_etat)
+	values (nextval('cablage_pays_gex.cable_id_cable_seq'),
+	new.identifiant, 
+	new.geom,   
+	new.date_mise_service, 
+	new.commentaire, 
+	round(st_length(new.geom)), 
+	(select id_type_cable from infos_pays_gex.type_cable where new.type_cable=type_cable.type),
+	(select id_nb_fo from infos_pays_gex.nb_fo where new.nb_fo=nb_fo.nb_fo), 
+	(select id_role_fibre from infos_pays_gex.role_fibre where new.role_fibre=role_fibre.role), 
+	(select id_type_fo from infos_pays_gex.type_fo where new.type_fo=type_fo.designation),
+	new.xlbl,
+	new.ylbl,
+	new.olbl,
+	(select id_etat from infos_pays_gex.etat where new.etat=etat.etat));
+
+	create or replace rule _delete as
+	on delete to vue_pays_gex.cables_""" + dossier + """
+	do instead update cablage_pays_gex.cable set date_abandon=date_trunc('second', localtimestamp), user_abandon=user, id_etat =9 where old.id_cable=cable.id_cable;
+
+	--drop view vue_pays_gex.chambres_""" + dossier + """;
+	create or replace view vue_pays_gex.chambres_""" + dossier + """ as
+	select id_chambre, identifiant, type_chambre.designation as type_chambre, etat.etat, tampon.designation as tampon, chambre.commentaire, dms as date_mise_service, precis_topo, method_leve.designation as type_leve, origine_data.designation as origine_donnee, chambre.longueur, chambre.largeur, chambre.profondeur, orientation, xlbl, ylbl, olbl,  chambre.geom
+	from infra_pays_gex.chambre
+	left join infos_pays_gex.type_chambre on type_chambre.id_type_chambre=chambre.id_type_chambre
+	left join infos_pays_gex.etat on etat.id_etat=chambre.id_etat
+	left join infos_pays_gex.origine_data on origine_data.id_origine_data=chambre.id_origine_data
+	left join infos_pays_gex.method_leve on method_leve.id_method_leve=chambre.id_method_leve
+	left join infos_pays_gex.tampon on tampon.id_tampon=chambre.id_tampon, 
+	geo_pays_gex.dossier
+	where st_intersects(dossier.geom, chambre.geom) and designation_axians = '""" + dossier + """';
+
+	create or replace rule _update as
+	on update to vue_pays_gex.chambres_""" + dossier + """
+	do instead update infra_pays_gex.chambre
+	set id_type_chambre = (select id_type_chambre from infos_pays_gex.type_chambre
+	where new.type_chambre=type_chambre.designation),
+	id_etat = (select id_etat from infos_pays_gex.etat
+	where new.etat=etat.etat),
+	id_origine_data = (select id_origine_data from infos_pays_gex.origine_data
+	where new.origine_donnee=origine_data.designation),
+	geom = new.geom,
+	commentaire = new.commentaire,
+	identifiant = new.identifiant,
+	dms = new.date_mise_service,
+	precis_topo = new.precis_topo,
+	id_method_leve = (select id_method_leve from infos_pays_gex.method_leve 
+	where new.type_leve=method_leve.designation),
+	orientation = new.orientation,
+	xlbl = new.xlbl,
+	ylbl = new.ylbl,
+	olbl = new.olbl,
+	id_tampon = (select id_tampon from infos_pays_gex.tampon
+	where new.tampon=tampon.designation)
+	where old.id_chambre=chambre.id_chambre;
+
+	create or replace rule _insert as
+	on insert to vue_pays_gex.chambres_""" + dossier + """
+	do instead insert into infra_pays_gex.chambre (id_chambre, identifiant, geom, id_etat, id_origine_data, dms, precis_topo, id_sys_alti, id_sys_plani, id_method_leve, commentaire, orientation, xlbl, ylbl, olbl, id_tampon)
+	values (nextval('infra_pays_gex.chambre_id_chambre_seq'),
+	new.identifiant, 
+	new.geom,
+	(select id_etat from infos_pays_gex.etat where new.etat=etat.etat),
+	(select id_origine_data from infos_pays_gex.origine_data where new.origine_donnee=origine_data.designation),
+	new.date_mise_service,
+	new.precis_topo,
+	3,
+	3,
+	(select id_method_leve from infos_pays_gex.method_leve where new.type_leve=method_leve.designation), 
+	new.commentaire,
+	new.orientation,
+	new.xlbl,
+	new.ylbl,
+	new.olbl,
+	(select id_tampon from infos_pays_gex.tampon where new.tampon=tampon.designation));
+
+	create or replace rule _delete as
+	on delete to vue_pays_gex.chambres_""" + dossier + """
+	do instead update infra_pays_gex.chambre set date_abandon=date_trunc('second', localtimestamp), user_abandon=user, id_etat =9 where old.id_chambre=chambre.id_chambre;
+
+	--drop view vue_pays_gex.fourreaux_ft;
+	create or replace view vue_pays_gex.fourreaux_ft_""" + dossier + """ as
+	select id_fou, designation, commentaire, chambre_up, chambre_down, xlbl, ylbl, olbl, fourreau_tel.geom
+	from infra_pays_gex.fourreau_tel, 
+	geo_pays_gex.dossier
+	where st_intersects(dossier.geom, fourreau_tel.geom) and designation_axians = '""" + dossier + """';
+
+	--drop view vue_pays_gex.bals;
+	create or replace view vue_pays_gex.bals as
+	select 
+	bal.id_bal,
+	bal.identifiant_immeuble, 
+	zapm.identifiant, 
+	adresse.hexacle, 
+	voie.rivoli, 
+	adresse.num_voie, 
+	voie.designation, 
+	voie.nom_quartier, 
+	adresse.insee, 
+	bal.batimentimmeuble,
+	bal.id_etat_addr,
+	bal.nb_loc_hab_ma, 
+	bal.nb_loc_hab_ap, 
+	bal.nb_loc_pro, 
+	dossier.id_dossier,
+	bal.raccordement,
+	bal.geom
+	from geo_pays_gex.bal
+	left join geo_pays_gex.adresse on bal.id_adresse = adresse.id_adresse
+	left join geo_pays_gex.zapm on bal.id_zapm=zapm.id_zapm
+	left join geo_pays_gex.voie on voie.id_voie=adresse.id_voie
+	left join geo_pays_gex.dossier on dossier.id_dossier=bal.id_dossier;
+
+
+
+	--drop view vue_pays_gex.supports_""" + dossier + """;
+	create or replace view vue_pays_gex.supports_""" + dossier + """ as
+	select id_support, identifiant, hauteur, type_support.designation as type_support, etat.etat, support.commentaire, dms as date_mise_service, precis_topo, method_leve.designation as type_leve, origine_data.designation as origine_donnee, orientation, xlbl, ylbl, olbl, support.geom
+	from infra_pays_gex.support
+	left join infos_pays_gex.type_support on type_support.id_type_support=support.id_type_support
+	left join infos_pays_gex.etat on etat.id_etat=support.id_etat
+	left join infos_pays_gex.origine_data on origine_data.id_origine_data=support.id_origine_data
+	left join infos_pays_gex.method_leve on method_leve.id_method_leve=support.id_method_leve, 
+	geo_pays_gex.dossier
+	where st_intersects(dossier.geom, support.geom) and designation_axians = '""" + dossier + """';
+
+	create or replace rule _update as
+	on update to vue_pays_gex.supports_""" + dossier + """
+	do instead update infra_pays_gex.support
+	set id_type_support = (select id_type_support from infos_pays_gex.type_support
+	where new.type_support=type_support.designation),
+	id_etat = (select id_etat from infos_pays_gex.etat
+	where new.etat=etat.etat),
+	id_origine_data = (select id_origine_data from infos_pays_gex.origine_data
+	where new.origine_donnee=origine_data.designation),
+	geom = new.geom,
+	commentaire = new.commentaire,
+	identifiant = new.identifiant,
+	dms = new.date_mise_service,
+	precis_topo = new.precis_topo,
+	id_method_leve = (select id_method_leve from infos_pays_gex.method_leve 
+	where new.type_leve=method_leve.designation),
+	orientation = new.orientation,
+	xlbl = new.xlbl,
+	ylbl = new.ylbl,
+	olbl = new.olbl,
+	hauteur = new.hauteur
+	where old.id_support=support.id_support;
+
+	create or replace rule _insert as
+	on insert to vue_pays_gex.supports_""" + dossier + """
+	do instead insert into infra_pays_gex.support (id_support, identifiant, geom, id_etat, id_origine_data, dms, precis_topo, id_sys_alti, id_sys_plani, id_method_leve, commentaire, orientation, xlbl, ylbl, olbl)
+	values (nextval('cablage_pays_gex.boite_id_boite_seq'),
+	new.identifiant, 
+	new.geom,
+	(select id_etat from infos_pays_gex.etat where new.etat=etat.etat),
+	(select id_origine_data from infos_pays_gex.origine_data where new.origine_donnee=origine_data.designation),
+	new.date_mise_service,
+	new.precis_topo,
+	3,
+	3,
+	(select id_method_leve from infos_pays_gex.method_leve where new.type_leve=method_leve.designation), 
+	new.commentaire,
+	new.orientation,
+	new.xlbl,
+	new.ylbl,
+	new.olbl);
+
+	create or replace rule _delete as
+	on delete to vue_pays_gex.supports_""" + dossier + """
+	do instead update infra_pays_gex.support set date_abandon=date_trunc('second', localtimestamp), user_abandon=user, id_etat =9 where old.id_support=support.id_support;
+
+	--drop view vue_pays_gex.boites_""" + dossier + """;
+	create or replace view vue_pays_gex.boites_""" + dossier + """ as
+	select id_boite, identifiant, nb_cassette, type_boite.type as type_boite, role_boite.role as role_boite, modele_boite.designation as modele_boite, boite.commentaire, etat.etat, dms as date_mise_service, orientation, xlbl, ylbl, olbl, boite.geom
+	from cablage_pays_gex.boite
+	left join infos_pays_gex.type_boite on type_boite.id_type_boite=boite.id_type_boite
+	left join infos_pays_gex.role_boite on role_boite.id_role_boite=boite.id_role_boite
+	left join infos_pays_gex.modele_boite on modele_boite.id_modele_boite=boite.id_modele_boite
+	left join infos_pays_gex.etat on etat.id_etat=boite.id_etat, 
+	geo_pays_gex.dossier
+	where st_intersects(dossier.geom, boite.geom) and designation_axians = '""" + dossier + """';
+
+	create or replace rule _update as
+	on update to vue_pays_gex.boites_""" + dossier + """
+	do instead update cablage_pays_gex.boite
+	set id_type_boite = (select id_type_boite from infos_pays_gex.type_boite 
+	where new.type_boite=type_boite.type),
+	id_modele_boite = (select id_modele_boite from infos_pays_gex.modele_boite
+	where new.modele_boite=modele_boite.designation),
+	id_role_boite = (select id_role_boite from infos_pays_gex.role_boite
+	where new.role_boite=role_boite.role),
+	id_etat = (select id_etat from infos_pays_gex.etat
+	where new.etat=etat.etat),
+	geom = new.geom,
+	commentaire = new.commentaire,
+	identifiant = new.identifiant,
+	dms = new.date_mise_service,
+	orientation = new.orientation,
+	xlbl = new.xlbl,
+	ylbl = new.ylbl,
+	olbl = new.olbl
+	where old.id_boite=boite.id_boite;
+
+	create or replace rule _insert as
+	on insert to vue_pays_gex.boites_""" + dossier + """
+	do instead insert into cablage_pays_gex.boite (id_boite, identifiant, geom, id_type_boite, id_modele_boite, id_role_boite, dms, orientation, xlbl, ylbl, olbl, commentaire, id_etat)
+	values (nextval('cablage_pays_gex.boite_id_boite_seq'),
+	new.identifiant, 
+	new.geom,
+	(select id_type_boite from infos_pays_gex.type_boite where new.type_boite=type_boite.type),
+	(select id_modele_boite from infos_pays_gex.modele_boite where new.modele_boite=modele_boite.designation),
+	(select id_role_boite from infos_pays_gex.role_boite where new.role_boite=role_boite.role),
+	new.date_mise_service, 
+	new.orientation,
+	new.xlbl,
+	new.ylbl,
+	new.olbl, 
+	new.commentaire,
+	(select id_etat from infos_pays_gex.etat where new.etat=etat.etat));
+
+	create or replace rule _delete as
+	on delete to vue_pays_gex.boites_""" + dossier + """
+	do instead update cablage_pays_gex.boite set date_abandon=date_trunc('second', localtimestamp), user_abandon=user, id_etat =9 where old.id_boite=boite.id_boite;
+
+	--drop view vue_pays_gex.nros_""" + dossier + """;
+	create or replace view vue_pays_gex.nros_""" + dossier + """ as
+	select id_nro, identifiant, equipement, type_nro.type as type_nro, nra.designation as nra , nro.commentaire, dms as date_mise_service, etat.etat, orientation, xlbl, ylbl, olbl, nro.geom
+	from cablage_pays_gex.nro
+	left join infos_pays_gex.type_nro on type_nro.id_type_nro=nro.id_type_nro
+	left join infos_pays_gex.nra on nra.id_nra=nro.id_nra
+	left join infos_pays_gex.etat on etat.id_etat=nro.id_etat, 
+	geo_pays_gex.dossier
+	where st_intersects(dossier.geom, nro.geom) and designation_axians = '""" + dossier + """';
+
+	create or replace rule _update as
+	on update to vue_pays_gex.nros_""" + dossier + """
+	do instead update cablage_pays_gex.nro
+	set id_type_nro = (select id_type_nro from infos_pays_gex.type_nro 
+	where new.type_nro=type_nro.type),
+	id_nra = (select id_nra from infos_pays_gex.nra
+	where new.nra=nra.designation),
+	id_etat = (select id_etat from infos_pays_gex.etat
+	where new.etat=etat.etat),
+	geom = new.geom,
+	commentaire = new.commentaire,
+	identifiant = new.identifiant,
+	dms = new.date_mise_service,
+	orientation = new.orientation,
+	xlbl = new.xlbl,
+	ylbl = new.ylbl,
+	olbl = new.olbl
+	where old.id_nro=nro.id_nro;
+
+	create or replace rule _insert as
+	on insert to vue_pays_gex.nros_""" + dossier + """
+	do instead insert into cablage_pays_gex.nro (id_nro, identifiant, geom, id_type_nro, id_nra, dms, orientation, xlbl, ylbl, olbl, commentaire, id_etat)
+	values (nextval('cablage_pays_gex.nro_id_nro_seq'),
+	new.identifiant, 
+	new.geom,
+	(select id_type_nro from infos_pays_gex.type_nro where new.type_nro=type_nro.type),
+	(select id_nra from infos_pays_gex.nra where new.nra=nra.designation),
+	new.date_mise_service, 
+	new.orientation,
+	new.xlbl,
+	new.ylbl,
+	new.olbl, 
+	new.commentaire,
+	(select id_etat from infos_pays_gex.etat where new.etat=etat.etat));
+
+	create or replace rule _delete as
+	on delete to vue_pays_gex.nros_""" + dossier + """
+	do instead update cablage_pays_gex.nro set date_abandon=date_trunc('second', localtimestamp), user_abandon=user, id_etat =9 where old.id_nro=nro.id_nro;
+	"""
+	cur.execute(commande)
+	conn.commit()
+	showinfo('Done', 'La vue a été créée !')
+	fenetre.destroy()
+
+
+fenetre = Tk()
+fenetre.title("Créer la vue d'un dossier")
+fenetre.geometry('200x500')
+var = StringVar(fenetre)
+label2 = Listbox(fenetre, height=22, width=30)
+for i in dossiers:
+	label2.insert(END, i)
+image = PhotoImage(file='\\\\10.159.107.12\\data\\Administratif\\Logos\\Logo Axians 2015.png')
+canvas = Canvas(fenetre, width=200, height=59)
+canvas.create_image(0,0,anchor=NW, image=image)
+canvas.pack(side=TOP)
+label1 = Label(fenetre, text='Choisir un dossier dans la liste\npuis cliquer sur "Créer la vue"').pack()
+label2.pack()
+button = Button(fenetre, text="Créer la vue", command = fonction).pack(pady=10)
+fenetre.mainloop()
